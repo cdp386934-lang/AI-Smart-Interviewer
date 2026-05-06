@@ -222,3 +222,11 @@ export const QUESTION_GENERATION_STRATEGIES = {
     }
   }
 };
+
+export default {
+  name: 'question-generate',
+  template: QUESTION_GENERATION_PROMPT,
+  description: '问题生成 Prompt 模板',
+  variables: ['candidate.name', 'candidate.skills', 'candidate.workExperience', 'candidate.projects', 'job.title', 'job.level', 'job.requiredSkills', 'job.description', 'stage', 'difficulty', 'context.previousQuestion', 'context.previousAnswer', 'context.currentProject', 'context.currentSkill'],
+  version: '1.0.0',
+};

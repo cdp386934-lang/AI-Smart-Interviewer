@@ -300,3 +300,11 @@ export const AREA_CLASSIFICATION_RULES = {
     ]
   }
 };
+
+export default {
+  name: 'answer-evaluate',
+  template: ANSWER_EVALUATION_PROMPT,
+  description: '回答评分 Prompt 模板',
+  variables: ['question.id', 'question.type', 'question.content', 'question.difficulty', 'question.expectedPoints', 'question.context', 'answer', 'candidate.name', 'candidate.skills', 'candidate.experience', 'currentSkills', 'context.stage', 'context.previousEvaluations'],
+  version: '1.0.0',
+};

@@ -349,3 +349,11 @@ export const SKILL_RADAR_CONFIG = {
   minScore: 0,
   gridLevels: [20, 40, 60, 80, 100]
 };
+
+export default {
+  name: 'report-generate',
+  template: REPORT_GENERATION_PROMPT,
+  description: '面试报告生成 Prompt 模板',
+  variables: ['session.id', 'session.config.jobTitle', 'session.config.jobLevel', 'session.config.difficulty', 'session.config.focusAreas', 'session.profile.skills', 'session.profile.strongAreas', 'session.profile.weakAreas', 'session.profile.personalityHints', 'session.profile.overallScore', 'session.metadata.createdAt', 'session.metadata.timeSpent', 'session.metadata.totalMessages', 'evaluations', 'questions', 'skillRadarTemplate'],
+  version: '1.0.0',
+};

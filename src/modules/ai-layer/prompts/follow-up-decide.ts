@@ -211,8 +211,8 @@ export const FOLLOW_UP_STRATEGIES = {
     name: '五问法',
     description: '连续追问为什么，挖掘根本原因',
     maxDepth: 3,
-   适用场景: ['技术原理', '问题根源', '决策依据'],
-    示例问题: [
+    applicableScenarios: ['技术原理', '问题根源', '决策依据'],
+    sampleQuestions: [
       '你为什么要选择这个方案？',
       '为什么认为这个方案最优？',
       '为什么会出现这个问题？',
@@ -224,8 +224,8 @@ export const FOLLOW_UP_STRATEGIES = {
     name: '澄清',
     description: '要求澄清模糊或不清楚的点',
     maxDepth: 1,
-    适用场景: ['回答模糊', '缺少细节', '表达不清'],
-    示例问题: [
+    applicableScenarios: ['回答模糊', '缺少细节', '表达不清'],
+    sampleQuestions: [
       '你提到的"优化"具体指什么？',
       '能详细说明一下这个过程吗？',
       '你所说的"性能好"具体是指哪些指标？',
@@ -236,8 +236,8 @@ export const FOLLOW_UP_STRATEGIES = {
     name: '深入挖掘',
     description: '要求提供更多细节和实现细节',
     maxDepth: 2,
-    适用场景: ['想了解细节', '考察深度', '验证真实性'],
-    示例问题: [
+    applicableScenarios: ['想了解细节', '考察深度', '验证真实性'],
+    sampleQuestions: [
       '请详细描述这个架构的工作流程',
       '这个功能是如何实现的？',
       '能说说具体的代码实现吗？',
@@ -248,13 +248,42 @@ export const FOLLOW_UP_STRATEGIES = {
     name: '替代方案',
     description: '询问其他可能的解决方案',
     maxDepth: 1,
-    适用场景: ['考察广度', '方案权衡', '知识面'],
-    示例问题: [
+    applicableScenarios: ['考察广度', '方案权衡', '知识面'],
+    sampleQuestions: [
       '如果不用这个技术，你会用什么替代？',
       '还有其他解决方案吗？',
       '这个方案有什么缺点？如果是你会怎么改进？'
     ]
   }
+};
+
+export default {
+  name: 'follow-up-decide',
+  template: FOLLOW_UP_DECIDE_PROMPT,
+  description: '追问决策 Prompt 模板',
+  variables: [
+    'question.id',
+    'question.type',
+    'question.content',
+    'question.difficulty',
+    'question.expectedPoints',
+    'question.context',
+    'answer',
+    'evaluation.score',
+    'evaluation.dimensions.technical',
+    'evaluation.dimensions.communication',
+    'evaluation.dimensions.logic',
+    'evaluation.dimensions.experience',
+    'evaluation.feedback',
+    'evaluation.missingPoints',
+    'context.currentStage',
+    'context.questionsInStage',
+    'context.followUpCount',
+    'context.timeSpent',
+    'context.difficulty',
+    'context.previousFollowUps',
+  ],
+  version: '1.0.0',
 };
 
 // 追问决策规则
