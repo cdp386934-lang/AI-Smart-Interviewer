@@ -78,4 +78,6 @@ export const Errors = {
   
   INVALID_TOKEN: () =>
     ErrorHandler.createError('INVALID_TOKEN', '无效的认证令牌', 401),
+
+  createError: ErrorHandler.createError,
 };

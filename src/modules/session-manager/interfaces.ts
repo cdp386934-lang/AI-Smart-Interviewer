@@ -1,4 +1,4 @@
-import { BusinessError } from '@/types/errors';
+import { BusinessError } from '@/types';
 import { StructuredResume } from '../resume-parser/interfaces';
 
 /**
@@ -67,6 +67,7 @@ export interface InterviewConfig {
   duration: number;                 // 预计时长（分钟）
   focusAreas: string[];             // 重点考察领域
   userId: string;                   // 用户ID
+  resume: StructuredResume;        // 候选人简历（会话快照）
   ip?: string;                      // IP地址
   userAgent?: string;               // 用户代理
 }
@@ -186,6 +187,12 @@ export const SessionErrors = {
     new SessionError('SESSION_NOT_FOUND', `会话不存在: ${sessionId}`, 404),
   INVALID_TRANSITION: (from: InterviewStage, to: InterviewStage) =>
     new SessionError('INVALID_TRANSITION', `无效的状态转移: ${from} -> ${to}`, 400),
+  INVALID_EVENT: (from: InterviewStage, event: InterviewEvent) =>
+    new SessionError(
+      'INVALID_EVENT',
+      `阶段 ${from} 不接受事件 ${event}`,
+      400
+    ),
   SESSION_TIMEOUT: (sessionId: string) =>
     new SessionError('SESSION_TIMEOUT', `会话已超时: ${sessionId}`, 408),
   TOO_MANY_SESSIONS: (userId: string) =>

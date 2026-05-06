@@ -8,7 +8,7 @@ import {
   WebSocketConnection 
 } from './interfaces';
 import { WebSocketMessage, WebSocketMessageType } from '@/types';
-import { IInterviewEngine } from '../modules/interview-engine/interfaces';
+import type { ILegacyInterviewEngine } from '../modules/interview-engine/legacy-engine.interface';
 import logger from '@/utils/logger';
 import { Errors } from '@/utils/errors';
 
@@ -16,10 +16,10 @@ export class WebSocketGateway implements IWebSocketGateway {
   private server: WebSocketServer;
   private connections: Map<string, WebSocketConnection>;
   private config: WebSocketGatewayConfig;
-  private interviewEngine: IInterviewEngine;
+  private interviewEngine: ILegacyInterviewEngine;
   private pingInterval: NodeJS.Timeout | null = null;
 
-  constructor(config: WebSocketGatewayConfig, interviewEngine: IInterviewEngine) {
+  constructor(config: WebSocketGatewayConfig, interviewEngine: ILegacyInterviewEngine) {
     this.config = config;
     this.interviewEngine = interviewEngine;
     this.connections = new Map();
@@ -73,6 +73,7 @@ export class WebSocketGateway implements IWebSocketGateway {
           userId,
           connectedAt: new Date(),
           lastActivity: new Date(),
+          authenticated: false,
         };
 
         this.connections.set(sessionId, connection);

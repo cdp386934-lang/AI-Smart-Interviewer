@@ -72,6 +72,12 @@ export interface ResumeData {
   rawText: string;
   filePath: string;
   createdAt: Date;
+  phone?: string;
+  education?: unknown[];
+  experience?: unknown[];
+  skills?: unknown[];
+  projects?: unknown[];
+  summary?: string;
 }
 
 // 会话状态
@@ -89,3 +95,4 @@ export interface ConnectionInfo {
 // 导出所有类型
 export * from './errors';
 export * from './validation';
+export * from './legacy-interview';

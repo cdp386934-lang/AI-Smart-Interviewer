@@ -8,8 +8,6 @@ import fs from 'fs/promises';
 import config from '@/config';
 import { container } from './container';
 import { IResumeParser } from './modules/resume-parser/interfaces';
-import { IInterviewEngine } from './modules/interview-engine/interfaces';
-import { ISessionManager } from './modules/session-manager/interfaces';
 import { ApiResponse, ResumeData } from './types';
 import logger from './utils/logger';
 import { ErrorHandler, Errors } from './utils/errors';

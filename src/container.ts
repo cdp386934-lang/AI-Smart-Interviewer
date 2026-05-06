@@ -1,14 +1,21 @@
 import config from '@/config';
 import { LangChainService } from './modules/ai-layer/langchain.service';
 import { ResumeParser } from './modules/resume-parser/resume.parser';
+import Redis from 'ioredis';
+
 import { InterviewEngine } from './modules/interview-engine/interview.engine';
-import { SessionManager } from './modules/session-manager/session.manager';
+import type { ILegacyInterviewEngine } from './modules/interview-engine/legacy-engine.interface';
+import {
+  InMemoryLongTermMessageStore,
+  PostgresLongTermMessageStore,
+  SessionManager,
+} from './modules/session-manager';
+import type { AppSessionManager } from './modules/session-manager';
 import { WebSocketGateway } from './gateway/websocket.gateway';
 import { IAIService } from './modules/ai-layer/interfaces';
 import { IResumeParser } from './modules/resume-parser/interfaces';
-import { IInterviewEngine } from './modules/interview-engine/interfaces';
-import { ISessionManager } from './modules/session-manager/interfaces';
 import { IWebSocketGateway } from './gateway/interfaces';
+import type { WebSocketGatewayConfig } from './gateway/interfaces';
 import logger from './utils/logger';
 
 /**
@@ -40,14 +47,26 @@ export class Container {
     });
     this.services.set('aiService', aiService);
 
-    // 2. 初始化会话管理器
+    // 2. 初始化会话管理器（状态机 + 短期 Redis + 长期 PG/内存）
+    const longTermStore =
+      process.env.USE_PG_LONG_TERM === '1'
+        ? new PostgresLongTermMessageStore({ connectionString: config.database.url })
+        : new InMemoryLongTermMessageStore();
+
+    const redisClient = new Redis(config.redis.url);
+
     const sessionManager = new SessionManager(
       {
-        sessionTTL: 24, // 24小时
+        sessionTTL: 24,
         redisPrefix: 'ai_interviewer',
         maxActiveSessions: 10,
+        maxMessagesPerSession: 40,
+        timeoutMinutes: 30,
+        enableCompression: true,
+        compressionThreshold: 20,
       },
-      config.redis.url
+      redisClient,
+      longTermStore
     );
     this.services.set('sessionManager', sessionManager);
 
@@ -57,6 +76,10 @@ export class Container {
         uploadDir: config.upload.dir,
         maxFileSize: config.upload.maxFileSize,
         supportedFormats: ['.pdf', '.docx', '.txt'],
+        cacheTTL: 24,
+        enableCache: true,
+        enableFallback: true,
+        timeout: 60000,
       },
       aiService
     );
@@ -76,16 +99,18 @@ export class Container {
     this.services.set('interviewEngine', interviewEngine);
 
     // 5. 初始化WebSocket网关
-    const wsGateway = new WebSocketGateway(
-      {
-        port: config.port + 1, // WebSocket使用下一个端口
-        path: '/ws',
-        pingInterval: 30000, // 30秒
-        connectionTimeout: 120000, // 2分钟
-        maxMessageSize: 1024 * 1024, // 1MB
-      },
-      interviewEngine
-    );
+    const wsGatewayConfig: WebSocketGatewayConfig = {
+      port: config.port + 1,
+      path: '/ws',
+      pingInterval: 30000,
+      connectionTimeout: 120000,
+      maxMessageSize: 1024 * 1024,
+      jwtSecret: config.jwt.secret,
+      enableReconnect: true,
+      maxReconnectAttempts: 5,
+      reconnectDelay: 2000,
+    };
+    const wsGateway = new WebSocketGateway(wsGatewayConfig, interviewEngine);
     this.services.set('wsGateway', wsGateway);
 
     logger.info('依赖注入容器初始化完成');
@@ -99,11 +124,11 @@ export class Container {
     return this.services.get('resumeParser');
   }
 
-  getInterviewEngine(): IInterviewEngine {
+  getInterviewEngine(): ILegacyInterviewEngine {
     return this.services.get('interviewEngine');
   }
 
-  getSessionManager(): ISessionManager {
+  getSessionManager(): AppSessionManager {
     return this.services.get('sessionManager');
   }
 

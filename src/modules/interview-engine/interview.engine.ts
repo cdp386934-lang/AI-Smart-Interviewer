@@ -1,27 +1,30 @@
 import { v4 as uuidv4 } from 'uuid';
 
-import { IInterviewEngine, InterviewEngineConfig } from './interfaces';
-import { 
-  ResumeData, 
-  InterviewQuestion, 
-  InterviewSession, 
+import {
+  ILegacyInterviewEngine,
+  LegacyInterviewEngineConfig,
+} from './legacy-engine.interface';
+import type { ResumeData } from '@/types';
+import type {
+  InterviewQuestion,
   InterviewFeedback,
-  InterviewAnswer 
-} from '@/types';
+  InterviewAnswer,
+  LegacyInterviewSession,
+} from '@/types/legacy-interview';
 import { IAIService } from '../ai-layer/interfaces';
-import { ISessionManager } from '../session-manager/interfaces';
+import type { ILegacySessionStorage } from '../session-manager/legacy-session.storage';
 import logger from '@/utils/logger';
 import { Errors } from '@/utils/errors';
 
-export class InterviewEngine implements IInterviewEngine {
-  private config: InterviewEngineConfig;
+export class InterviewEngine implements ILegacyInterviewEngine {
+  private config: LegacyInterviewEngineConfig;
   private aiService: IAIService;
-  private sessionManager: ISessionManager;
+  private sessionManager: ILegacySessionStorage;
 
   constructor(
-    config: InterviewEngineConfig,
+    config: LegacyInterviewEngineConfig,
     aiService: IAIService,
-    sessionManager: ISessionManager
+    sessionManager: ILegacySessionStorage
   ) {
     this.config = config;
     this.aiService = aiService;
@@ -34,7 +37,7 @@ export class InterviewEngine implements IInterviewEngine {
     position: string,
     questionCount: number = this.config.defaultQuestionCount,
     difficulty: 'easy' | 'medium' | 'hard' = this.config.defaultDifficulty
-  ): Promise<InterviewSession> {
+  ): Promise<LegacyInterviewSession> {
     try {
       // 生成面试问题
       const questions = await this.aiService.generateQuestions(
@@ -45,14 +48,14 @@ export class InterviewEngine implements IInterviewEngine {
       );
 
       // 创建会话
-      const session: InterviewSession = {
+      const session: LegacyInterviewSession = {
         id: uuidv4(),
         candidateId,
         resumeId: resume.id,
         position,
         status: 'pending',
         currentQuestionIndex: 0,
-        questions: questions.map((q, index) => ({
+        questions: questions.map((q) => ({
           ...q,
           id: uuidv4(),
           timeLimit: q.timeLimit || this.config.timePerQuestion,
@@ -228,7 +231,7 @@ export class InterviewEngine implements IInterviewEngine {
     }
   }
 
-  async getSessionStatus(sessionId: string): Promise<InterviewSession> {
+  async getSessionStatus(sessionId: string): Promise<LegacyInterviewSession> {
     try {
       const session = await this.sessionManager.getSession(sessionId);
       return session;

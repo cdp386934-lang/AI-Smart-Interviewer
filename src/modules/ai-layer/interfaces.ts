@@ -1,5 +1,8 @@
 import { z, ZodSchema } from 'zod';
 
+import type { ResumeData } from '@/types';
+import type { InterviewFeedback, InterviewQuestion } from '@/types/legacy-interview';
+
 /**
  * AI能力层接口定义
  */
@@ -98,4 +101,45 @@ export interface EmbeddingResult {
 export interface StructuredOutputOptions {
   strict?: boolean;
   maxRetries?: number;
+}
+
+/** LangChain 等服务使用的模型与会话参数 */
+export interface AIServiceConfig {
+  apiKey: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeout?: number;
+}
+
+/** 面试场景下的 AI 服务（问题生成、评分、反馈） */
+export interface IAIService {
+  generateQuestions(
+    resume: ResumeData,
+    position: string,
+    count: number,
+    difficulty: 'easy' | 'medium' | 'hard'
+  ): Promise<InterviewQuestion[]>;
+
+  evaluateAnswer(
+    question: InterviewQuestion,
+    answer: string,
+    resume: ResumeData
+  ): Promise<{
+    score: number;
+    feedback: string;
+    keywordsMatched: string[];
+    suggestions: string[];
+  }>;
+
+  generateFeedback(
+    sessionId: string,
+    questions: InterviewQuestion[],
+    answers: Array<{ question: InterviewQuestion; answer: string; score: number }>,
+    resume: ResumeData
+  ): Promise<InterviewFeedback>;
+
+  parseResumeText(text: string): Promise<Partial<ResumeData>>;
+
+  healthCheck(): Promise<boolean>;
 }

@@ -7,7 +7,12 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { JsonOutputFunctionsParser } from 'langchain/output_parsers';
 
 import { IAIService, AIServiceConfig } from './interfaces';
-import { ResumeData, InterviewQuestion, InterviewFeedback } from '@/types';
+import { ResumeData } from '@/types';
+import {
+  getQuestionText,
+  type InterviewFeedback,
+  type InterviewQuestion,
+} from '@/types/legacy-interview';
 import logger from '@/utils/logger';
 import { Errors } from '@/utils/errors';
 
@@ -129,7 +134,7 @@ export class LangChainService implements IAIService {
       ]);
 
       const result = await chain.invoke({
-        question: question.text,
+        question: getQuestionText(question),
         type: question.type,
         difficulty: question.difficulty,
         keywords: question.expectedKeywords?.join(', ') || '无',
@@ -192,7 +197,7 @@ export class LangChainService implements IAIService {
 
       const qaSummary = answers.map((item, index) => `
         问题 ${index + 1} (${item.question.type}, ${item.question.difficulty}):
-        Q: ${item.question.text}
+        Q: ${getQuestionText(item.question)}
         A: ${item.answer}
         得分: ${item.score}/100
       `).join('\n');
