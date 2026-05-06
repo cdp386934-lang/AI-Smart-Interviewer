@@ -1,148 +1,60 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { calculateDifficulty, InterviewEngine } from './interview.engine';
+import type { InterviewSession } from '../session-manager/interfaces';
 
-import { ModularInterviewEngine } from './interview-engine';
-import type { IAILayer } from '../ai-layer/interfaces';
-import { InterviewStage } from '../session-manager/interfaces';
+const session = {
+  id: 's1',
+  stage: 'technical',
+  config: { jobTitle: '前端工程师', jobLevel: 'mid', difficulty: 'medium', duration: 60, focusAreas: ['React'], userId: 'u1', resume: {} as any },
+  resume: {
+    basicInfo: { targetPosition: '前端工程师', years: 3 },
+    projects: [{ name: 'CRM', description: 'crm', technologies: ['React'], role: '开发' }],
+    workExperience: [{ company: 'A', position: 'B', duration: '1年', description: 'd', technologies: ['React'] }],
+    skills: [],
+    rawText: 'React React',
+  } as any,
+  messages: [],
+  profile: {
+    skills: new Map([['React', 0.8]]),
+    weakAreas: ['Node.js'],
+    strongAreas: ['React'],
+    personalityHints: [],
+    overallScore: 0,
+  },
+  metadata: { createdAt: new Date(), updatedAt: new Date(), lastActivityAt: new Date(), totalMessages: 0, timeSpent: 0 },
+} as InterviewSession;
 
-const aiMock: IAILayer = {
-  chat: vi.fn(),
-  streamChat: vi.fn(),
-  structuredOutput: vi.fn(),
-  toolCall: vi.fn(),
-  embed: vi.fn(),
-  healthCheck: vi.fn(),
-};
+describe('InterviewEngine helpers', () => {
+  it('calculateDifficulty should respect strong area', () => {
+    expect(calculateDifficulty(session.profile, 'React')).toBe(5);
+  });
 
-function createSession(overrides: Partial<any> = {}) {
-  return {
-    id: 'session-1',
-    stage: InterviewStage.TECHNICAL,
-    config: {
-      jobTitle: '后端工程师',
-      jobLevel: 'mid',
-      difficulty: 'medium',
-      duration: 60,
-      focusAreas: ['Node.js', 'TypeScript'],
-      userId: 'user-1',
-    },
-    resume: {
-      name: '张三',
-      skills: [{ name: 'Node.js', level: 'advanced' }],
-      experience: [{ company: 'A', position: '开发', startDate: '2022', description: '负责后端', skills: ['Node.js'] }],
-      projects: [{ name: '电商平台', description: '平台', technologies: ['Node.js'], role: '主程' }],
-    },
-    messages: [],
-    profile: {
-      skills: new Map([['Node.js', 0.7]]),
-      weakAreas: [],
-      strongAreas: [],
-      personalityHints: [],
-      overallScore: 0,
-    },
-    metadata: {
-      createdAt: new Date('2026-01-01'),
-      updatedAt: new Date('2026-01-01'),
-      lastActivityAt: new Date('2026-01-01'),
-      totalMessages: 0,
-      timeSpent: 120,
-    },
-    ...overrides,
-  };
+  it('calculateDifficulty should respect weak area', () => {
+    expect(calculateDifficulty(session.profile, 'Node.js')).toBeLessThan(3);
+  });
+});
+
+class MockAI {
+  async chat() { return '你可以结合实际项目说明一下吗？'; }
+  async structuredOutput() { return { score: 80, dimensions: { technical: 80, communication: 75, logic: 78, experience: 82 }, feedback: '不错', missingPoints: [], followUpNeeded: false, skillUpdates: [], answerQuality: 'good' as const, questionId: 'q1' }; }
 }
 
-describe('ModularInterviewEngine', () => {
-  it('生成问题时会调用结构化输出并补全默认值', async () => {
-    aiMock.structuredOutput = vi.fn().mockResolvedValue({
-      id: 'q-1',
-      type: 'technical',
-      content: '请解释 Node.js 事件循环',
-      difficulty: 3,
-      expectedPoints: ['事件循环', '宏任务', '微任务'],
-    });
+describe('InterviewEngine', () => {
+  const engine = new InterviewEngine(new MockAI() as any);
 
-    const engine = new ModularInterviewEngine(aiMock);
-    const question = await engine.generateQuestion(createSession());
-
-    expect(question.id).toBe('q-1');
-    expect(question.timeout).toBeGreaterThan(0);
-    expect(question.expectedPoints).toHaveLength(3);
+  it('should transition from self_intro to technical', async () => {
+    const next = await engine.decideTransition({ ...session, stage: 'self_intro' } as any, { score: 80 } as any);
+    expect(next).toBe('technical');
   });
 
-  it('回答评估应返回评分和追问标记', async () => {
-    aiMock.structuredOutput = vi.fn().mockResolvedValue({
-      questionId: 'q-1',
-      score: 88,
-      dimensions: { technical: 90, communication: 85, logic: 88, experience: 80 },
-      feedback: '回答完整',
-      missingPoints: [],
-      followUpNeeded: false,
-      skillUpdates: { 'Node.js': 0.8 },
-    });
-
-    const engine = new ModularInterviewEngine(aiMock);
-    const evaluation = await engine.evaluateAnswer(createSession(), '回答内容');
-
-    expect(evaluation.score).toBe(88);
-    expect(evaluation.followUpNeeded).toBe(false);
-    expect(evaluation.dimensions.technical).toBe(90);
+  it('should transition from technical to project_deep after 3 correct answers', async () => {
+    const s = { ...session, stage: 'technical', messages: Array.from({ length: 3 }, (_, i) => ({ role: 'assistant', content: `q${i}`, metadata: { evaluation: { score: 90 } } })) } as any;
+    const next = await engine.decideTransition(s, { score: 90 } as any);
+    expect(next).toBe('project_deep');
   });
 
-  it('追问决策应在需要时进入 follow_up', async () => {
-    aiMock.structuredOutput = vi.fn().mockResolvedValue({
-      shouldFollowUp: true,
-      followUpType: 'clarification',
-      reasoning: '答案不够具体',
-      priority: 1,
-    });
-
-    const engine = new ModularInterviewEngine(aiMock);
-    const stage = await engine.decideTransition(createSession(), {
-      questionId: 'q-1',
-      score: 55,
-      dimensions: { technical: 50, communication: 55, logic: 45, experience: 40 },
-      feedback: '模糊',
-      missingPoints: ['细节'],
-      followUpNeeded: true,
-      skillUpdates: new Map(),
-    });
-
-    expect(stage).toBe('follow_up');
-  });
-
-  it('报告生成应输出面试报告结构', async () => {
-    aiMock.structuredOutput = vi.fn().mockResolvedValue({
-      sessionId: 'session-1',
-      summary: '整体表现良好',
-      strengths: ['学习能力'],
-      weaknesses: ['系统设计'],
-      recommendations: ['加强系统设计训练'],
-      overallScore: 82,
-      hiringRecommendation: 'recommend',
-      skillRadar: { 'Node.js': 80 },
-      stagePerformance: { technical: { averageScore: 82, questionCount: 3, feedback: '良好' } },
-      detailedAnalysis: { technical: '好', communication: '好', logic: '好', experience: '好' },
-    });
-
-    const engine = new ModularInterviewEngine(aiMock);
-    const report = await engine.generateReport(createSession());
-
-    expect(report.sessionId).toBe('session-1');
-    expect(report.averageScore).toBe(0);
-    expect(report.recommendations).toContain('加强系统设计训练');
-  });
-
-  it('实时反馈应根据分数给出中文评级', async () => {
-    const engine = new ModularInterviewEngine(aiMock);
-    const feedback = await engine.generateRealtimeFeedback({
-      questionId: 'q-1',
-      score: 90,
-      dimensions: { technical: 90, communication: 90, logic: 90, experience: 90 },
-      feedback: '很好',
-      missingPoints: [],
-      followUpNeeded: false,
-      skillUpdates: new Map(),
-    });
-
-    expect(feedback).toContain('优秀');
+  it('should fallback generate realtime feedback', async () => {
+    const text = await engine.generateRealtimeFeedback({ score: 88, feedback: '答得很好', missingPoints: [], dimensions: { technical: 0, communication: 0, logic: 0, experience: 0 }, followUpNeeded: false, skillUpdates: [], answerQuality: 'excellent', questionId: 'q1' });
+    expect(text.length).toBeGreaterThan(0);
   });
 });

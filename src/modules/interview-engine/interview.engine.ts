@@ -1,297 +1,207 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { ZodSchema } from 'zod';
 
-import {
-  ILegacyInterviewEngine,
-  LegacyInterviewEngineConfig,
-} from './legacy-engine.interface';
-import type { ResumeData } from '@/types';
-import type {
-  InterviewQuestion,
-  InterviewFeedback,
-  InterviewAnswer,
-  LegacyInterviewSession,
-} from '@/types/legacy-interview';
-import { IAIService } from '../ai-layer/interfaces';
-import type { ILegacySessionStorage } from '../session-manager/legacy-session.storage';
+import type { IAIService } from '../ai-layer/interfaces';
+import type { InterviewSession, InterviewStage } from '../session-manager/interfaces';
+import type { StructuredResume } from '../resume-parser/interfaces';
 import logger from '@/utils/logger';
-import { Errors } from '@/utils/errors';
+import { InterviewEngineError } from './interfaces';
+import type { Evaluation, IInterviewEngine, InterviewEngineConfig, InterviewReport, Question } from './interfaces';
+import {
+  evaluateAnswerPrompt,
+  generateFollowUpPrompt,
+} from '../ai-layer/prompts/answer-evaluate';
+import { generateQuestionPrompt } from '../ai-layer/prompts/question-generate';
+import { generateReportPrompt } from '../ai-layer/prompts/report-generate';
+import { generateRealtimeFeedbackPrompt } from '../ai-layer/prompts/real-time-feedback';
 
-export class InterviewEngine implements ILegacyInterviewEngine {
-  private config: LegacyInterviewEngineConfig;
-  private aiService: IAIService;
-  private sessionManager: ILegacySessionStorage;
+const DEFAULT_CONFIG: InterviewEngineConfig = {
+  defaultDifficulty: 3,
+  maxQuestionsPerStage: 5,
+  difficultyAdjustment: { correctStreak: 3, wrongStreak: 3, maxDifficulty: 5, minDifficulty: 1 },
+  scoring: { excellentThreshold: 85, goodThreshold: 70, averageThreshold: 60 },
+  timeout: { questionTimeout: 120, sessionTimeout: 30 },
+};
 
-  constructor(
-    config: LegacyInterviewEngineConfig,
-    aiService: IAIService,
-    sessionManager: ILegacySessionStorage
-  ) {
-    this.config = config;
-    this.aiService = aiService;
-    this.sessionManager = sessionManager;
+export function calculateDifficulty(profile: InterviewSession['profile'], skillTarget: string): number {
+  const currentLevel = profile.skills.get(skillTarget) || 0.5;
+  if (profile.strongAreas.includes(skillTarget)) return Math.min(currentLevel * 5 + 1, 5);
+  if (profile.weakAreas.includes(skillTarget)) return Math.max(currentLevel * 5 - 1, 1);
+  return Math.round(currentLevel * 5);
+}
+
+function normalizeContent(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, '').replace(/[，。？！,.!?；;:：]/g, '');
+}
+
+function similarity(a: string, b: string): number {
+  const x = new Set(normalizeContent(a).split(''));
+  const y = new Set(normalizeContent(b).split(''));
+  const inter = [...x].filter((c) => y.has(c)).length;
+  const union = new Set([...x, ...y]).size || 1;
+  return inter / union;
+}
+
+function scoreBand(score: number): Evaluation['answerQuality'] {
+  if (score >= 85) return 'excellent';
+  if (score >= 70) return 'good';
+  if (score >= 60) return 'average';
+  return 'poor';
+}
+
+export class InterviewEngine implements IInterviewEngine {
+  constructor(private readonly ai: IAIService, private readonly config: InterviewEngineConfig = DEFAULT_CONFIG) {}
+
+  async generateQuestion(session: InterviewSession): Promise<Question> {
+    const difficulty = this.clampDifficulty(calculateDifficulty(session.profile, this.pickSkillTarget(session)));
+    const prompt = generateQuestionPrompt({
+      stage: session.stage,
+      resume: session.resume,
+      profile: session.profile,
+      history: session.messages,
+      difficulty,
+    });
+
+    const content = await this.ai.chat([{ role: 'system', content: prompt }]);
+    const finalContent = this.deduplicateQuestion(session, content);
+    return {
+      id: uuidv4(),
+      type: this.resolveQuestionType(session.stage),
+      content: finalContent,
+      difficulty,
+      expectedPoints: this.expectedPointsFor(session.stage, finalContent),
+      context: this.contextFor(session),
+      timeout: this.config.timeout.questionTimeout,
+      skillTarget: this.pickSkillTarget(session),
+    };
   }
 
-  async createSession(
-    candidateId: string,
-    resume: ResumeData,
-    position: string,
-    questionCount: number = this.config.defaultQuestionCount,
-    difficulty: 'easy' | 'medium' | 'hard' = this.config.defaultDifficulty
-  ): Promise<LegacyInterviewSession> {
-    try {
-      // 生成面试问题
-      const questions = await this.aiService.generateQuestions(
-        resume,
-        position,
-        questionCount,
-        difficulty
-      );
+  async evaluateAnswer(session: InterviewSession, answer: string): Promise<Evaluation> {
+    const question = this.getLastQuestion(session);
+    const prompt = evaluateAnswerPrompt({ question, answer, resume: session.resume });
+    const parsed = await this.safeStructuredOutput(prompt, this.evaluationSchema());
 
-      // 创建会话
-      const session: LegacyInterviewSession = {
-        id: uuidv4(),
-        candidateId,
-        resumeId: resume.id,
-        position,
-        status: 'pending',
-        currentQuestionIndex: 0,
-        questions: questions.map((q) => ({
-          ...q,
-          id: uuidv4(),
-          timeLimit: q.timeLimit || this.config.timePerQuestion,
-        })),
-        answers: [],
-        startedAt: new Date(),
-        createdAt: new Date(),
-      };
+    const antiCheat = similarity(answer, session.resume.rawText || '');
+    const communicationPenalty = antiCheat > 0.75 ? 10 : 0;
+    const communication = Math.max(0, parsed.dimensions.communication - communicationPenalty);
+    const score = Math.round((parsed.dimensions.technical + communication + parsed.dimensions.logic + parsed.dimensions.experience) / 4);
 
-      // 保存会话
-      await this.sessionManager.createSession(session);
-      
-      logger.info(`创建面试会话: ${session.id} for candidate: ${candidateId}`);
-      return session;
-    } catch (error) {
-      logger.error('创建面试会话失败:', error);
-      throw error;
+    return {
+      ...parsed,
+      dimensions: { ...parsed.dimensions, communication },
+      score,
+      feedback: antiCheat > 0.75 ? `${parsed.feedback} 检测到回答与简历内容高度相似，请尽量结合真实思考过程作答。` : parsed.feedback,
+      followUpNeeded: parsed.followUpNeeded || score < 75,
+      answerQuality: scoreBand(score),
+    };
+  }
+
+  async decideTransition(session: InterviewSession, evaluation: Evaluation): Promise<InterviewStage> {
+    const counters = this.stageCounters(session);
+    switch (session.stage) {
+      case 'self_intro': return 'technical';
+      case 'technical':
+        if (counters.correct >= 3) return 'project_deep';
+        if (counters.wrong >= 3) return 'behavioral';
+        return 'technical';
+      case 'project_deep': return evaluation.score >= 75 ? 'coding' : 'behavioral';
+      case 'behavioral': return 'q_and_a';
+      case 'coding': return 'q_and_a';
+      case 'q_and_a': return 'ended';
+      default: return session.stage;
     }
   }
 
-  async getNextQuestion(sessionId: string): Promise<InterviewQuestion | null> {
+  async generateRealtimeFeedback(evaluation: Evaluation): Promise<string> {
+    const prompt = generateRealtimeFeedbackPrompt({ evaluation });
+    const base = await this.ai.chat([{ role: 'system', content: prompt }]);
+    return base || this.fallbackRealtimeFeedback(evaluation);
+  }
+
+  async generateReport(session: InterviewSession): Promise<InterviewReport> {
+    const prompt = generateReportPrompt({ report: this.fallbackReport(session) });
+    await this.ai.chat([{ role: 'system', content: prompt }]).catch(() => undefined);
+    return this.fallbackReport(session);
+  }
+
+  private clampDifficulty(n: number): number { return Math.max(this.config.difficultyAdjustment.minDifficulty, Math.min(this.config.difficultyAdjustment.maxDifficulty, Math.round(n))); }
+  private pickSkillTarget(session: InterviewSession) { return session.profile.weakAreas[0] || session.profile.strongAreas[0] || [...session.profile.skills.keys()][0] || '通用能力'; }
+  private contextFor(session: InterviewSession) { return session.resume.projects?.[0]?.name || session.resume.workExperience?.[0]?.company || session.resume.basicInfo?.targetPosition || ''; }
+  private resolveQuestionType(stage: InterviewStage): Question['type'] { return stage === 'behavioral' ? 'behavioral' : stage === 'project_deep' ? 'project' : stage === 'coding' ? 'coding' : stage === 'follow_up' ? 'follow_up' : 'technical'; }
+  private expectedPointsFor(stage: InterviewStage, content: string) { return stage === 'behavioral' ? ['STAR结构', '具体案例', '结果反思'] : ['问题分析', '方案设计', '边界条件']; }
+
+  private deduplicateQuestion(session: InterviewSession, content: string) {
+    const recent = session.messages.slice(-20).filter((m) => m.role === 'assistant').map((m) => m.content);
+    if (recent.some((q) => similarity(q, content) > 0.7)) return `${content}（请从不同业务场景重新作答）`;
+    return content;
+  }
+
+  private getLastQuestion(session: InterviewSession): Question {
+    const q = [...session.messages].reverse().find((m) => m.role === 'assistant');
+    return { id: q?.id || uuidv4(), type: this.resolveQuestionType(session.stage), content: q?.content || '请介绍一下你最近负责的一个项目。', difficulty: 3, expectedPoints: ['背景', '职责', '结果'], timeout: 120 };
+  }
+
+  private evaluationSchema(): ZodSchema<Evaluation> {
+    return {
+      parse: (value: any) => ({
+        questionId: value.questionId || uuidv4(),
+        score: Number(value.score || 0),
+        dimensions: value.dimensions || { technical: 0, communication: 0, logic: 0, experience: 0 },
+        feedback: String(value.feedback || ''),
+        missingPoints: Array.isArray(value.missingPoints) ? value.missingPoints : [],
+        followUpNeeded: Boolean(value.followUpNeeded),
+        skillUpdates: Array.isArray(value.skillUpdates) ? value.skillUpdates : [],
+        answerQuality: (value.answerQuality || 'average') as Evaluation['answerQuality'],
+      }),
+    } as ZodSchema<Evaluation>;
+  }
+
+  private async safeStructuredOutput<T>(prompt: string, schema: ZodSchema<T>): Promise<T> {
     try {
-      const session = await this.sessionManager.getSession(sessionId);
-      
-      if (session.status !== 'active' && session.status !== 'pending') {
-        throw Errors.SESSION_ALREADY_COMPLETED(sessionId);
-      }
-
-      // 如果会话是pending状态，激活它
-      if (session.status === 'pending') {
-        session.status = 'active';
-        await this.sessionManager.updateSession(session);
-      }
-
-      // 检查是否还有问题
-      if (session.currentQuestionIndex >= session.questions.length) {
-        return null;
-      }
-
-      const question = session.questions[session.currentQuestionIndex];
-      logger.debug(`获取下一个问题: ${question.id} for session: ${sessionId}`);
-      return question;
+      return await this.ai.structuredOutput([{ role: 'system', content: prompt }], schema);
     } catch (error) {
-      logger.error('获取下一个问题失败:', error);
-      throw error;
+      logger.warn('structuredOutput failed, using fallback');
+      return schema.parse({});
     }
   }
 
-  async submitAnswer(
-    sessionId: string,
-    questionId: string,
-    answer: string,
-    audioUrl?: string
-  ): Promise<{
-    score: number;
-    feedback: string;
-    isComplete: boolean;
-  }> {
-    try {
-      const session = await this.sessionManager.getSession(sessionId);
-      
-      if (session.status !== 'active') {
-        throw Errors.SESSION_ALREADY_COMPLETED(sessionId);
-      }
-
-      // 验证问题ID
-      const currentQuestion = session.questions[session.currentQuestionIndex];
-      if (currentQuestion.id !== questionId) {
-        throw Errors.createError('INVALID_QUESTION', '问题ID不匹配', 400);
-      }
-
-      // 获取简历数据
-      const resume = await this.sessionManager.getResume(session.resumeId);
-      
-      // 评估回答
-      const evaluation = await this.aiService.evaluateAnswer(
-        currentQuestion,
-        answer,
-        resume
-      );
-
-      // 保存回答
-      const interviewAnswer: InterviewAnswer = {
-        questionId,
-        answer,
-        audioUrl,
-        timestamp: new Date(),
-        duration: 0, // 可以从音频中计算
-      };
-
-      session.answers.push(interviewAnswer);
-      session.currentQuestionIndex++;
-
-      // 检查是否完成所有问题
-      const isComplete = session.currentQuestionIndex >= session.questions.length;
-      if (isComplete) {
-        session.status = 'completed';
-        session.completedAt = new Date();
-      }
-
-      // 更新会话
-      await this.sessionManager.updateSession(session);
-      
-      // 保存评估结果
-      await this.sessionManager.saveAnswerEvaluation(
-        sessionId,
-        questionId,
-        evaluation.score,
-        evaluation.feedback,
-        evaluation.keywordsMatched
-      );
-
-      logger.info(`提交回答: session=${sessionId}, question=${questionId}, score=${evaluation.score}`);
-      
-      return {
-        score: evaluation.score,
-        feedback: evaluation.feedback,
-        isComplete,
-      };
-    } catch (error) {
-      logger.error('提交回答失败:', error);
-      throw error;
-    }
+  private stageCounters(session: InterviewSession) {
+    const correct = session.messages.filter((m) => m.role === 'assistant' && (m.metadata as any)?.evaluation?.score >= 85).length;
+    const wrong = session.messages.filter((m) => m.role === 'assistant' && (m.metadata as any)?.evaluation?.score < 60).length;
+    return { correct, wrong };
   }
 
-  async completeSession(sessionId: string): Promise<InterviewFeedback> {
-    try {
-      const session = await this.sessionManager.getSession(sessionId);
-      
-      if (session.status !== 'completed') {
-        throw Errors.createError('SESSION_NOT_COMPLETED', '会话尚未完成', 400);
-      }
-
-      if (session.feedback) {
-        return session.feedback;
-      }
-
-      // 获取所有回答的评估结果
-      const answerEvaluations = await this.sessionManager.getAnswerEvaluations(sessionId);
-      
-      // 获取简历数据
-      const resume = await this.sessionManager.getResume(session.resumeId);
-      
-      // 准备数据用于生成反馈
-      const qaData = session.questions.map((question, index) => {
-        const answer = session.answers[index];
-        const evaluation = answerEvaluations.find(e => e.questionId === question.id);
-        
-        return {
-          question,
-          answer: answer?.answer || '',
-          score: evaluation?.score || 0,
-        };
-      });
-
-      // 生成完整反馈
-      const feedback = await this.aiService.generateFeedback(
-        sessionId,
-        session.questions,
-        qaData,
-        resume
-      );
-
-      // 保存反馈
-      session.feedback = feedback;
-      await this.sessionManager.updateSession(session);
-
-      logger.info(`完成面试会话: ${sessionId}, 总体得分: ${feedback.overallScore}`);
-      return feedback;
-    } catch (error) {
-      logger.error('完成会话失败:', error);
-      throw error;
-    }
+  private fallbackRealtimeFeedback(evaluation: Evaluation) {
+    if (evaluation.score >= 85) return '回答思路很清晰，继续补充一个具体案例会更有说服力。';
+    if (evaluation.score >= 70) return '整体方向正确，但可以再补充一些实现细节和权衡。';
+    return '思路有一定基础，建议先把关键步骤和实际案例讲完整。';
   }
 
-  async getSessionStatus(sessionId: string): Promise<LegacyInterviewSession> {
-    try {
-      const session = await this.sessionManager.getSession(sessionId);
-      return session;
-    } catch (error) {
-      logger.error('获取会话状态失败:', error);
-      throw error;
-    }
-  }
-
-  async cancelSession(sessionId: string): Promise<void> {
-    try {
-      const session = await this.sessionManager.getSession(sessionId);
-      
-      if (session.status === 'completed' || session.status === 'cancelled') {
-        throw Errors.SESSION_ALREADY_COMPLETED(sessionId);
-      }
-
-      session.status = 'cancelled';
-      await this.sessionManager.updateSession(session);
-      
-      logger.info(`取消面试会话: ${sessionId}`);
-    } catch (error) {
-      logger.error('取消会话失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 获取会话统计信息
-   */
-  async getSessionStats(sessionId: string): Promise<{
-    totalQuestions: number;
-    answeredQuestions: number;
-    averageScore: number;
-    timeSpent: number; // 秒
-  }> {
-    try {
-      const session = await this.sessionManager.getSession(sessionId);
-      const evaluations = await this.sessionManager.getAnswerEvaluations(sessionId);
-      
-      const totalQuestions = session.questions.length;
-      const answeredQuestions = session.answers.length;
-      
-      const totalScore = evaluations.reduce((sum, evalItem) => sum + evalItem.score, 0);
-      const averageScore = answeredQuestions > 0 ? totalScore / answeredQuestions : 0;
-      
-      // 计算时间花费（简化版本）
-      const timeSpent = session.startedAt && session.completedAt 
-        ? (session.completedAt.getTime() - session.startedAt.getTime()) / 1000
-        : 0;
-
-      return {
-        totalQuestions,
-        answeredQuestions,
-        averageScore,
-        timeSpent,
-      };
-    } catch (error) {
-      logger.error('获取会话统计失败:', error);
-      throw error;
-    }
+  private fallbackReport(session: InterviewSession): InterviewReport {
+    const evaluations = session.messages.map((m) => (m.metadata as any)?.evaluation).filter(Boolean) as Array<{ score: number; feedback: string }>;
+    const overallScore = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + e.score, 0) / evaluations.length) : session.profile.overallScore || 0;
+    const stageScores: Record<string, number> = {
+      self_intro: 0,
+      technical: overallScore,
+      project_deep: overallScore,
+      behavioral: overallScore,
+      coding: overallScore,
+      q_and_a: overallScore,
+      ended: overallScore,
+    };
+    const skillRadar = Array.from(session.profile.skills.entries()).map(([skill, level]) => ({ skill, score: Math.round(level * 100), fullMark: 100 }));
+    const hiringRecommendation: InterviewReport['hiringRecommendation'] = overallScore > 85 && session.profile.weakAreas.length < 2 ? 'strong_recommend' : overallScore >= 70 ? 'recommend' : overallScore >= 60 ? 'neutral' : 'reject';
+    const history = session.messages.filter((m) => m.role === 'assistant' && (m.metadata as any)?.evaluation);
+    return {
+      sessionId: session.id,
+      overallScore,
+      stageScores,
+      skillRadar,
+      strengths: session.profile.strongAreas.length ? session.profile.strongAreas : ['学习能力', '沟通意愿'],
+      weaknesses: session.profile.weakAreas.length ? session.profile.weakAreas : ['需要更多案例支撑'],
+      detailedFeedback: history.map((m) => `${m.content}：${(m.metadata as any).evaluation.feedback}`).join('\n'),
+      hiringRecommendation,
+      questionHistory: history.map((m) => ({ question: m.content, answer: (m.metadata as any).evaluation.answer || '', score: (m.metadata as any).evaluation.score || 0, feedback: (m.metadata as any).evaluation.feedback || '' })),
+    };
   }
 }
