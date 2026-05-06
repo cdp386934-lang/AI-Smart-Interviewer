@@ -1,61 +1,101 @@
-import { ResumeData, InterviewQuestion, InterviewFeedback } from '@/types';
+import { z, ZodSchema } from 'zod';
 
 /**
- * AI 服务接口定义
+ * AI能力层接口定义
  */
-export interface IAIService {
-  /**
-   * 根据简历生成面试问题
-   */
-  generateQuestions(
-    resume: ResumeData,
-    position: string,
-    count: number,
-    difficulty: 'easy' | 'medium' | 'hard'
-  ): Promise<InterviewQuestion[]>;
+export interface IAILayer {
+  // 基础对话
+  chat(messages: ChatMessage[], options?: ChatOptions): Promise<string>;
   
-  /**
-   * 评估面试回答
-   */
-  evaluateAnswer(
-    question: InterviewQuestion,
-    answer: string,
-    resume: ResumeData
-  ): Promise<{
-    score: number;
-    feedback: string;
-    keywordsMatched: string[];
-    suggestions: string[];
-  }>;
+  streamChat(messages: ChatMessage[], options?: ChatOptions): AsyncGenerator<string>;
   
-  /**
-   * 生成面试总结反馈
-   */
-  generateFeedback(
-    sessionId: string,
-    questions: InterviewQuestion[],
-    answers: Array<{ question: InterviewQuestion; answer: string; score: number }>,
-    resume: ResumeData
-  ): Promise<InterviewFeedback>;
+  // 结构化输出（JSON Schema）
+  structuredOutput<T>(messages: ChatMessage[], schema: ZodSchema<T>): Promise<T>;
   
-  /**
-   * 解析简历文本为结构化数据
-   */
-  parseResumeText(text: string): Promise<Partial<ResumeData>>;
+  // 工具调用
+  toolCall(messages: ChatMessage[], tools: Tool[]): Promise<ToolCallResult>;
   
-  /**
-   * 健康检查
-   */
+  // Embedding（简历相似度匹配）
+  embed(text: string): Promise<number[]>;
+  
+  // 健康检查
   healthCheck(): Promise<boolean>;
 }
 
 /**
- * AI 服务配置
+ * 聊天消息
  */
-export interface AIServiceConfig {
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * 聊天选项
+ */
+export interface ChatOptions {
+  model?: string;           // 模型选择
+  temperature?: number;     // 温度
+  maxTokens?: number;       // 最大 token
+  callbacks?: Callbacks;    // 回调（用于日志、监控）
+}
+
+/**
+ * 工具定义
+ */
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: Record<string, any>;
+}
+
+/**
+ * 工具调用结果
+ */
+export interface ToolCallResult {
+  toolName: string;
+  arguments: Record<string, any>;
+  result: any;
+}
+
+/**
+ * 回调接口
+ */
+export interface Callbacks {
+  onStart?: () => void;
+  onToken?: (token: string) => void;
+  onComplete?: (result: string) => void;
+  onError?: (error: Error) => void;
+}
+
+/**
+ * AI配置
+ */
+export interface AIConfig {
   apiKey: string;
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
+  defaultModel: string;
+  defaultTemperature?: number;
+  defaultMaxTokens?: number;
   timeout?: number;
+  maxRetries?: number;
+}
+
+/**
+ * Embedding结果
+ */
+export interface EmbeddingResult {
+  embedding: number[];
+  model: string;
+  usage: {
+    promptTokens: number;
+    totalTokens: number;
+  };
+}
+
+/**
+ * 结构化输出选项
+ */
+export interface StructuredOutputOptions {
+  strict?: boolean;
+  maxRetries?: number;
 }
