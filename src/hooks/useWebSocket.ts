@@ -1,106 +1,89 @@
-import { useEffect, useMemo, useRef } from 'react';
-import type { Message, InterviewState, ReportData } from '../app/types';
-import { useInterviewStore } from '../store/interviewStore';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ClientEvents, ServerEvents } from '@/types/shared';
+import { useAppStore } from '@/store';
+
+type Handler<T> = (payload: T) => void;
 
 export interface UseWebSocketReturn {
   connected: boolean;
-  send: (event: string, payload: any) => void;
-  messages: Message[];
-  interviewState: InterviewState | null;
-  realtimeScore: number;
-  isTyping: boolean;
-  startInterview: (resumeId: string, jobId: string) => void;
-  sendAnswer: (content: string) => void;
-  endInterview: () => void;
+  authenticated: boolean;
+  connecting: boolean;
+  send: <T extends keyof ClientEvents>(event: T, payload: ClientEvents[T]) => void;
+  on: <T extends keyof ServerEvents>(event: T, handler: Handler<ServerEvents[T]>) => () => void;
+  once: <T extends keyof ServerEvents>(event: T, handler: Handler<ServerEvents[T]>) => void;
+  connect: (token: string) => void;
+  disconnect: () => void;
+  reconnect: () => void;
+  latency: number;
+  lastPingTime: number;
 }
 
-interface UseWebSocketOptions {
-  url: string;
-  token?: string;
-}
+export function useWebSocket(url = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws'): UseWebSocketReturn {
+  const [connected, setConnected] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [latency, setLatency] = useState(0);
+  const [lastPingTime, setLastPingTime] = useState(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const tokenRef = useRef<string>('');
+  const queueRef = useRef<Array<{ event: keyof ClientEvents; payload: any }>>([]);
+  const listenersRef = useRef(new Map<string, Set<Function>>());
+  const onceRef = useRef(new Map<string, Set<Function>>());
 
-export function useWebSocket({ url, token }: UseWebSocketOptions): UseWebSocketReturn {
-  const socketRef = useRef<WebSocket | null>(null);
-  const connected = useInterviewStore((s) => s.connected);
-  const messages = useInterviewStore((s) => s.messages);
-  const interviewState = useInterviewStore((s) => s.interviewState);
-  const realtimeScore = useInterviewStore((s) => s.realtimeScore);
-  const isTyping = useInterviewStore((s) => s.isTyping);
-  const setConnected = useInterviewStore((s) => s.setConnected);
-  const setTyping = useInterviewStore((s) => s.setTyping);
-  const setRealtimeScore = useInterviewStore((s) => s.setRealtimeScore);
-  const pushMessage = useInterviewStore((s) => s.pushMessage);
-  const setInterviewState = useInterviewStore((s) => s.setInterviewState);
-  const setReport = useInterviewStore((s) => s.setReport);
-
-  const send = useMemo(() => (event: string, payload: any) => {
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ event, data: payload, timestamp: new Date().toISOString() }));
-    }
-  }, []);
-
-  useEffect(() => {
-    const socket = new WebSocket(url);
-    socketRef.current = socket;
-
-    socket.onopen = () => {
-      setConnected(true);
-      if (token) send('auth', { token });
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        const { event: evt, data } = message;
-
-        if (evt === 'interviewer:typing') setTyping(true);
-        if (evt === 'interviewer:question') setTyping(false);
-        if (evt === 'evaluation:realtime') setRealtimeScore(data.score);
-        if (evt === 'interview:started') {
-          setInterviewState({
-            sessionId: data.sessionId,
-            stage: 'technical',
-            currentQuestion: data.firstQuestion.content,
-            currentSkill: data.firstQuestion.context,
-            questionIndex: 0,
-            totalQuestions: 10,
-            timeSpent: 0,
-            currentScore: 0,
-          });
-        }
-        if (evt === 'interview:stage_change' && interviewState) {
-          setInterviewState({ ...interviewState, stage: data.to });
-        }
-        if (evt === 'interview:ended') {
-          setReport(data.report as ReportData);
-        }
-        if (evt === 'interviewer:question') {
-          pushMessage({ id: crypto.randomUUID(), role: 'assistant', content: data.question.content, timestamp: new Date().toISOString(), metadata: { questionType: data.question.type } });
-        }
-        if (evt === 'error') {
-          pushMessage({ id: crypto.randomUUID(), role: 'system', content: data.message, timestamp: new Date().toISOString() });
-        }
-      } catch {
-        pushMessage({ id: crypto.randomUUID(), role: 'system', content: String(event.data), timestamp: new Date().toISOString() });
-      }
-    };
-
-    socket.onclose = () => setConnected(false);
-    socket.onerror = () => setConnected(false);
-
-    return () => socket.close();
-  }, [url, token, send, pushMessage, setConnected, setTyping, setRealtimeScore, setInterviewState, setReport]);
-
-  return {
-    connected,
-    send,
-    messages,
-    interviewState,
-    realtimeScore,
-    isTyping,
-    startInterview: (resumeId, jobId) => send('interview:start', { resumeId, jobId }),
-    sendAnswer: (content) => send('interview:answer', { content }),
-    endInterview: () => send('interview:end', {}),
+  const emit = (event: string, payload: any) => {
+    listenersRef.current.get(event)?.forEach((fn) => fn(payload));
+    const onceSet = onceRef.current.get(event);
+    onceSet?.forEach((fn) => fn(payload));
+    onceSet?.clear();
   };
+
+  const connect = (token: string) => {
+    tokenRef.current = token;
+    setConnecting(true);
+    const ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setConnected(true);
+      setConnecting(false);
+      ws.send(JSON.stringify({ event: 'auth', data: { token }, timestamp: new Date().toISOString() }));
+      queueRef.current.forEach(({ event, payload }) => ws.send(JSON.stringify({ event, data: payload, timestamp: new Date().toISOString() })));
+      queueRef.current = [];
+      useAppStore.getState().setInterview((prev) => prev ?? null);
+    };
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.event === 'auth:result') setAuthenticated(Boolean(msg.data.success));
+      if (msg.event === 'pong') { setLastPingTime(msg.data.timestamp); setLatency(Date.now() - msg.data.timestamp); }
+      emit(msg.event, msg.data);
+    };
+    ws.onclose = () => { setConnected(false); setAuthenticated(false); setConnecting(false); };
+    ws.onerror = () => setConnecting(false);
+  };
+
+  useEffect(() => { return () => wsRef.current?.close(); }, []);
+
+  const send = <T extends keyof ClientEvents>(event: T, payload: ClientEvents[T]) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ event, data: payload, timestamp: new Date().toISOString() }));
+    else queueRef.current.push({ event, payload });
+  };
+
+  const on = <T extends keyof ServerEvents>(event: T, handler: Handler<ServerEvents[T]>) => {
+    const set = listenersRef.current.get(event) ?? new Set();
+    set.add(handler);
+    listenersRef.current.set(event, set);
+    return () => set.delete(handler);
+  };
+
+  const once = <T extends keyof ServerEvents>(event: T, handler: Handler<ServerEvents[T]>) => {
+    const set = onceRef.current.get(event) ?? new Set();
+    set.add(handler);
+    onceRef.current.set(event, set);
+  };
+
+  const disconnect = () => wsRef.current?.close();
+  const reconnect = () => { if (tokenRef.current) connect(tokenRef.current); };
+
+  return useMemo(() => ({ connected, authenticated, connecting, send, on, once, connect, disconnect, reconnect, latency, lastPingTime }), [connected, authenticated, connecting, latency, lastPingTime]);
 }

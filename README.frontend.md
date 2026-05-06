@@ -2,16 +2,21 @@
 
 ## 启动说明
 
-1. 安装依赖
-2. 配置 WebSocket 地址
-3. 启动前端开发服务器
+```bash
+npm install
+npm run dev
+```
 
-## 页面
-- Landing
-- Upload
-- Optimize
-- Interview
-- Report
+## 环境变量
 
-## 说明
-当前提供可用于 UI 开发的基础结构、模拟数据与交互 Hook。
+- `VITE_WS_URL`：WebSocket 地址
+- `VITE_API_BASE_URL`：API 地址
+
+## 项目结构
+
+- `src/pages` 页面
+- `src/components` 组件
+- `src/hooks` 交互 Hooks
+- `src/store` Zustand 状态
+- `src/api` HTTP 客户端
+- `src/types/shared.ts` 前后端共享类型
