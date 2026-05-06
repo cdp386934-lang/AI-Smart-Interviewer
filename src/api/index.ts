@@ -1,21 +1,8 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import { authRouter } from './routes/auth';
-import { resumeRouter } from './routes/resume';
-import { jobsRouter } from './routes/jobs';
-import { interviewRouter } from './routes/interview';
-import { errorHandler } from './middleware/error-handler';
-
-export function createApiApp() {
-  const app = express();
-  app.use(helmet());
-  app.use(cors());
-  app.use(express.json());
-  app.use('/api/auth', authRouter);
-  app.use('/api/resume', resumeRouter);
-  app.use('/api/jobs', jobsRouter);
-  app.use('/api/interview', interviewRouter);
-  app.use(errorHandler);
-  return app;
-}
+export * from './routes/auth';
+export * from './routes/resume';
+export * from './routes/jobs';
+export * from './routes/interview';
+export * from './middleware/auth';
+export * from './middleware/rate-limit';
+export * from './middleware/error-handler';
+export * from './middleware/validate';

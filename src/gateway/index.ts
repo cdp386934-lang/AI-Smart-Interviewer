@@ -6,3 +6,4 @@ export * from './handlers/auth-handler';
 export * from './handlers/heartbeat-handler';
 export * from './handlers/interview-handler';
 export * from './middleware/ws-auth';
+export * from './middleware/rate-limit';

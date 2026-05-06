@@ -1,4 +1,4 @@
-import type { HandlerContext, ClientEvents } from '../types';
+import type { ClientEvents, HandlerContext } from '../types';
 
 export class HeartbeatHandler {
   async handlePing(context: HandlerContext, payload: ClientEvents['ping']): Promise<void> {

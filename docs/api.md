@@ -2,7 +2,6 @@
 
 ## 认证
 ### POST `/api/auth/login`
-Request:
 ```json
 { "email": "demo@example.com", "password": "secret" }
 ```
@@ -21,7 +20,7 @@ Response:
 ### POST `/api/resume/upload`
 Response:
 ```json
-{ "id": "r1", "status": "completed", "structured": { "basicInfo": { "name": "Demo" } } }
+{ "id": "r1", "status": "completed", "structured": { "basicInfo": { "name": "Demo", "phone": "", "email": "", "targetPosition": "FE" } } }
 ```
 
 ### GET `/api/resume/:id`
