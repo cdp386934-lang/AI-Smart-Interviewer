@@ -3,23 +3,14 @@ services:
     build: .
     ports:
       - "3000:3000"
-      - "3001:3001"
     environment:
       NODE_ENV: production
       PORT: 3000
-      API_PREFIX: /api/v1
       REDIS_URL: redis://redis:6379
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_interviewer
-      JWT_SECRET: change-me
     depends_on:
-      - redis
       - postgres
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
+      - redis
   postgres:
     image: postgres:16-alpine
     environment:
@@ -28,3 +19,7 @@ services:
       POSTGRES_DB: ai_interviewer
     ports:
       - "5432:5432"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
