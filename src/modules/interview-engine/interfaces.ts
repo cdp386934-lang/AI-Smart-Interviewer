@@ -1,5 +1,4 @@
-import type { ZodSchema } from 'zod';
-import type { InterviewSession, InterviewStage, CandidateProfile } from '../session-manager/interfaces';
+import type { InterviewSession, InterviewStage } from '../session-manager/interfaces';
 import type { StructuredResume } from '../resume-parser/interfaces';
 
 export interface IInterviewEngine {
@@ -82,4 +81,4 @@ export class InterviewEngineError extends Error {
   }
 }
 
-export type { InterviewSession, InterviewStage, CandidateProfile, StructuredResume };
+export type { InterviewSession, InterviewStage, StructuredResume };
