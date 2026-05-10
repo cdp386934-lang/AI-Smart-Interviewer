@@ -1,31 +1,44 @@
-# AI Agent 智能面试官系统
+# AI Smart Interviewer
 
-## 启动
+## 本地最小闭环启动步骤
 
+### 1. 准备环境变量
+```bash
+cp .env.example .env.development
+```
+填写以下关键值：
+- `LLM_API_KEY`
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
+- `DB_PASSWORD`
+- `REDIS_HOST` / `REDIS_PORT`
+
+### 2. 启动数据库和 Redis
+```bash
+docker compose up -d postgres redis
+```
+
+### 3. 迁移数据库
+```bash
+chmod +x scripts/migrate.sh
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_interviewer ./scripts/migrate.sh
+```
+
+### 4. 安装依赖并启动
 ```bash
 npm install
 npm run dev
 ```
 
-## 环境变量
+### 5. 前端流程
+1. 打开 `http://localhost:5173/upload`
+2. 上传简历文件
+3. 可选输入公司需求 / JD
+4. 选择“上传优化”或“直接面试”
+5. 系统会根据简历 + 公司需求出题
 
-- `VITE_WS_URL`：WebSocket 地址
-- `VITE_API_BASE_URL`：API 地址
-- `NODE_ENV`：运行环境
-
-## 项目结构
-
-- `src/pages` 页面
-- `src/components` 组件
-- `src/hooks` 交互 Hooks
-- `src/store` 全局状态
-- `src/api` HTTP 客户端
-- `src/types/shared.ts` 前后端共享类型
-
-## 测试
-
-```bash
-npm test
-npm run test:e2e
-npm run test:playwright
-```
+## 说明
+- 上传简历是必须步骤
+- 公司需求是可选项
+- 不需要手工格式化简历
+- 后续面试问题会优先结合公司需求和简历生成

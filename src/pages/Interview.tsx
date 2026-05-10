@@ -7,16 +7,45 @@ import { SkillRadar } from '@/components/SkillRadar';
 import { StageIndicator } from '@/components/StageIndicator';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import { useInterview } from '@/hooks/useInterview';
+import { apiClient } from '@/api/client';
 import { useAppStore } from '@/store';
 import { InterviewStage } from '@/types/shared';
 
 export function InterviewPage() {
   const interview = useInterview();
-  const { flowContext, currentResume, optimizedResume } = useAppStore();
+  const { flowContext, currentResume, optimizedResume, setInterview } = useAppStore();
   const resume = optimizedResume || currentResume;
   const [answer, setAnswer] = useState('');
+  const [starting, setStarting] = useState(false);
   const canSend = !interview.isAiTyping && !interview.isStreaming && !!answer.trim();
   const highlight = useMemo(() => interview.currentQuestion?.context || flowContext.focusSkills.join(', '), [interview.currentQuestion, flowContext.focusSkills]);
+
+  useEffect(() => {
+    const start = async () => {
+      if (!resume || starting || interview.sessionId) return;
+      setStarting(true);
+      try {
+        const result = await apiClient.interview.start({
+          resume,
+          jobDescription: flowContext.jobDescription || '',
+          companyName: flowContext.companyName || '',
+          focusSkills: flowContext.focusSkills || resume.skills,
+          userId: 'demo-user',
+        });
+        setInterview({
+          sessionId: result.sessionId,
+          stage: result.stage,
+          status: 'interviewing',
+          currentQuestion: result.firstQuestion,
+          questionSequence: 1,
+          progress: { current: 1, total: 10, elapsedTime: 0 },
+        });
+      } finally {
+        setStarting(false);
+      }
+    };
+    void start();
+  }, [resume, starting, interview.sessionId, flowContext, setInterview]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -35,6 +64,7 @@ export function InterviewPage() {
           <div className="text-sm text-slate-500">面试上下文</div>
           <div className="mt-2 text-lg font-semibold">{flowContext.companyName || '未填写公司需求'}</div>
           <div className="mt-2 text-sm text-slate-600">{flowContext.jobDescription || '系统将基于你的简历自动生成问题'}</div>
+          <div className="mt-3 text-xs text-slate-500">状态：{starting ? '正在准备面试...' : interview.status}</div>
         </div>
         <ResumeViewer resume={resume} highlight={highlight} />
         <div className="rounded-large bg-surface p-4 shadow-card"><div className="mb-2 text-sm text-slate-500">技能标签</div><div className="flex flex-wrap gap-2">{resume?.skills.map((s) => <span key={s} className="rounded-full bg-slate-100 px-3 py-1 text-sm">{s}</span>)}</div></div>

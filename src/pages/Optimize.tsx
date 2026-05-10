@@ -3,36 +3,56 @@ import { useAppStore } from '@/store';
 
 export function OptimizePage() {
   const navigate = useNavigate();
-  const { currentResume, optimizedResume, optimizationResult, setOptimizedResume } = useAppStore();
-  const resume = optimizedResume || currentResume;
+  const { currentResume, flowContext, setOptimizedResume } = useAppStore();
 
   return (
-    <div className="mx-auto max-w-7xl p-6 space-y-6">
+    <div className="mx-auto max-w-6xl p-6 space-y-6">
+      <div className="rounded-large bg-surface p-5 shadow-card">
+        <h2 className="text-2xl font-bold">简历优化</h2>
+        <p className="mt-2 text-slate-600">这里用于查看系统给出的优化建议，但不会要求你手动格式化简历。</p>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-large bg-surface p-4 shadow-card space-y-3">
-          <h3 className="text-lg font-semibold">原始简历</h3>
-          <pre className="whitespace-pre-wrap text-sm text-slate-600">{JSON.stringify(currentResume, null, 2)}</pre>
+        <div className="rounded-large bg-surface p-4 shadow-card">
+          <h3 className="mb-3 text-lg font-semibold">原始简历</h3>
+          <div className="space-y-2 text-sm text-slate-600">
+            <div>姓名：{currentResume?.name || '未填写'}</div>
+            <div>摘要：{currentResume?.summary || '未填写'}</div>
+            <div>技能：{currentResume?.skills.join('、') || '未填写'}</div>
+          </div>
         </div>
-        <div className="rounded-large bg-surface p-4 shadow-card space-y-3">
-          <h3 className="text-lg font-semibold">优化建议</h3>
-          {(optimizationResult?.suggestions || []).map((s, idx) => (
-            <div key={idx} className="rounded-card border p-3 text-sm">
-              <div className="font-medium">[{s.priority}] {s.category}</div>
-              <div className="text-slate-600">{s.issue}</div>
-              <div className="mt-1 text-slate-500">{s.suggestion}</div>
-              <button className="mt-2 rounded-full bg-success px-3 py-1 text-white" onClick={() => setOptimizedResume({ ...(resume || { name: '', summary: '', skills: [], projects: [] }), summary: `${resume?.summary || ''}\n${s.suggestion}` })}>应用</button>
-            </div>
-          ))}
-          {!optimizationResult?.suggestions?.length ? <div className="text-sm text-slate-500">暂无建议，先上传公司需求再生成优化结果</div> : null}
+
+        <div className="rounded-large bg-surface p-4 shadow-card">
+          <h3 className="mb-3 text-lg font-semibold">优化建议</h3>
+          <div className="space-y-3 text-sm text-slate-600">
+            <div>公司需求：{flowContext.jobDescription || '未填写（可选）'}</div>
+            <div>建议：系统会根据简历和公司需求给出内容优化建议。</div>
+            <div>说明：不需要你在这里手工格式化简历。</div>
+          </div>
         </div>
-        <div className="rounded-large bg-surface p-4 shadow-card space-y-3">
-          <h3 className="text-lg font-semibold">优化后预览</h3>
-          <textarea className="min-h-72 w-full rounded-card border p-3 text-sm" value={JSON.stringify(resume, null, 2)} readOnly />
+
+        <div className="rounded-large bg-surface p-4 shadow-card">
+          <h3 className="mb-3 text-lg font-semibold">优化后预览</h3>
+          <div className="space-y-2 text-sm text-slate-600">
+            <div>系统会在这里显示优化后的简历版本。</div>
+            <div>如果你不想优化，也可以直接进入面试。</div>
+          </div>
         </div>
       </div>
-      <div className="flex gap-3">
-        <button className="rounded-full bg-primary px-5 py-3 text-white" onClick={() => navigate('/interview')}>开始面试</button>
-        <button className="rounded-full border px-5 py-3" onClick={() => navigate('/upload')}>返回编辑</button>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          className="rounded-full bg-primary px-5 py-3 text-white"
+          onClick={() => {
+            if (currentResume) setOptimizedResume(currentResume);
+            navigate('/interview');
+          }}
+        >
+          上传优化
+        </button>
+        <button className="rounded-full border px-5 py-3" onClick={() => navigate('/interview')}>
+          直接面试
+        </button>
       </div>
     </div>
   );

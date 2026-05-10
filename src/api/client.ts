@@ -40,6 +40,7 @@ export const apiClient = {
     get: (id: string) => api.get(`/api/jobs/${id}`).then((r) => r.data),
   },
   interview: {
+    start: (payload: { resume: any; jobDescription?: string; companyName?: string; focusSkills?: string[]; userId?: string }) => api.post('/api/interview/start', payload).then((r) => r.data),
     list: (params?: { page?: number; limit?: number; status?: string }) => api.get('/api/interview/history', { params }).then((r) => r.data),
     get: (id: string) => api.get(`/api/interview/${id}`).then((r) => r.data),
     getReport: (id: string) => api.get(`/api/interview/${id}/report`).then((r) => r.data),
